@@ -618,6 +618,7 @@ class Flow(object):
         self.pbb_isid = 0
         self.tunnel_id = 0
         self.ipv6_exthdr = 0
+        self.user_tag = 0
 
 
 class FlowWildcards(object):
@@ -638,6 +639,7 @@ class FlowWildcards(object):
         self.pbb_isid_mask = 0
         self.tunnel_id_mask = 0
         self.ipv6_exthdr_mask = 0
+        self.user_tag_mask = 0
         self.wildcards = (1 << 64) - 1
 
     def ft_set(self, shift):
@@ -702,6 +704,7 @@ class OFPMatch(StringifyMixin):
     pbb_isid         Integer 24bit   PBB I-SID
     tunnel_id        Integer 64bit   Logical Port Metadata
     ipv6_exthdr      Integer 16bit   IPv6 Extension Header pseudo-field
+    user_tag         Integer 32bit   UCTP
     ================ =============== ==================================
 
     Example::
@@ -879,6 +882,7 @@ class OFPMatch(StringifyMixin):
         OXM_OF_PBB_ISID        PBB I-SID
         OXM_OF_TUNNEL_ID       Logical Port Metadata
         OXM_OF_IPV6_EXTHDR     IPv6 Extension Header pseudo-field
+        OXM_OF_USER_TAG        UCTP
         ====================== ===================================
         """
         self.fields.append(OFPMatchField.make(header, value, mask))
@@ -966,6 +970,15 @@ class OFPMatch(StringifyMixin):
         if self._wc.ft_test(ofproto_v1_3.OFPXMT_OFB_VLAN_PCP):
             self.append_field(ofproto_v1_3.OXM_OF_VLAN_PCP,
                               self._flow.vlan_pcp)
+            
+        # uctp
+        if self._wc.ft_test(ofproto_v1_3.OFPXMT_OFB_USER_TAG):
+            if self._wc.user_tag_mask == UINT32_MAX:
+                header = ofproto_v1_3.OXM_OF_USER_TAG
+            else:
+                header = ofproto_v1_3.OXM_OF_USER_TAG_W
+            self.append_field(header, self._flow.user_tag,
+                              self._wc.user_tag_mask)
 
         if self._wc.ft_test(ofproto_v1_3.OFPXMT_OFB_IP_DSCP):
             self.append_field(ofproto_v1_3.OXM_OF_IP_DSCP, self._flow.ip_dscp)
@@ -1232,6 +1245,14 @@ class OFPMatch(StringifyMixin):
         self._wc.ft_set(ofproto_v1_3.OFPXMT_OFB_VLAN_VID)
         self._wc.vlan_vid_mask = mask
         self._flow.vlan_vid = vid
+        
+    def set_user_tag(self, uid):
+        self.set_vlan_user_tag_masked(uid, UINT32_MAX)
+        
+    def set_vlan_user_tag_masked(self, uid, mask):
+        self._wc.ft_set(ofproto_v1_3.OFPXMT_OFB_USER_TAG)
+        self._wc.user_tag_mask = mask
+        self._flow.user_tag = uid
 
     def set_vlan_pcp(self, pcp):
         self._wc.ft_set(ofproto_v1_3.OFPXMT_OFB_VLAN_PCP)
@@ -1978,6 +1999,16 @@ class MTIPv6ExtHdr(OFPMatchField):
         self.value = value
         self.mask = mask
 
+
+@OFPMatchField.register_field_header([ofproto_v1_3.OXM_OF_USER_TAG,
+                                      ofproto_v1_3.OXM_OF_USER_TAG_W])
+class MTUserTag(OFPMatchField):
+    pack_str = '!I'
+
+    def __init__(self, header, value, mask=None):
+        super(MTUserTag, self).__init__(header)
+        self.value = value
+        self.mask = mask
 
 @_register_parser
 @_set_msg_type(ofproto_v1_3.OFPT_PACKET_IN)
@@ -2864,6 +2895,62 @@ class OFPActionPushVlan(OFPAction):
         msg_pack_into(ofproto_v1_3.OFP_ACTION_PUSH_PACK_STR, buf, offset,
                       self.type, self.len, self.ethertype)
 
+@OFPAction.register_action_type(ofproto_v1_3.OFPAT_PUSH_UCTP,
+                                ofproto_v1_3.OFP_ACTION_PUSH_SIZE)
+class OFPActionPushUctp(OFPAction):
+    """
+    Push UCTP action
+
+    This action pushes a new UCTP tag to the packet.
+
+    ================ ======================================================
+    Attribute        Description
+    ================ ======================================================
+    ethertype        Ether type
+    ================ ======================================================
+    """
+    def __init__(self, ethertype, type_=None, len_=None):
+        super(OFPActionPushUctp, self).__init__()
+        self.ethertype = ethertype
+
+    @classmethod
+    def parser(cls, buf, offset):
+        (type_, len_, ethertype) = struct.unpack_from(
+            ofproto_v1_3.OFP_ACTION_PUSH_PACK_STR, buf, offset)
+        return cls(ethertype)
+
+    def serialize(self, buf, offset):
+        msg_pack_into(ofproto_v1_3.OFP_ACTION_PUSH_PACK_STR, buf, offset,
+                      self.type, self.len, self.ethertype)
+
+@OFPAction.register_action_type(ofproto_v1_3.OFPAT_ENCAP_UCTP,
+                                ofproto_v1_3.OFP_ACTION_PUSH_SIZE)
+class OFPActionEncapUctp(OFPAction):
+    """
+    Encap UCTP action
+
+    This action encapsulates a new UCTP tag to the packet.
+
+    ================ ======================================================
+    Attribute        Description
+    ================ ======================================================
+    ethertype        Ether type
+    ================ ======================================================
+    """
+    def __init__(self, ethertype, type_=None, len_=None):
+        super(OFPActionEncapUctp, self).__init__()
+        self.ethertype = ethertype
+
+    @classmethod
+    def parser(cls, buf, offset):
+        (type_, len_, ethertype) = struct.unpack_from(
+            ofproto_v1_3.OFP_ACTION_PUSH_PACK_STR, buf, offset)
+        return cls(ethertype)
+
+    def serialize(self, buf, offset):
+        msg_pack_into(ofproto_v1_3.OFP_ACTION_PUSH_PACK_STR, buf, offset,
+                      self.type, self.len, self.ethertype)
+
 
 @OFPAction.register_action_type(ofproto_v1_3.OFPAT_PUSH_MPLS,
                                 ofproto_v1_3.OFP_ACTION_PUSH_SIZE)
@@ -2911,6 +2998,39 @@ class OFPActionPopVlan(OFPAction):
             ofproto_v1_3.OFP_ACTION_HEADER_PACK_STR, buf, offset)
         return cls()
 
+@OFPAction.register_action_type(ofproto_v1_3.OFPAT_POP_UCTP,
+                                ofproto_v1_3.OFP_ACTION_HEADER_SIZE)
+class OFPActionPopUctp(OFPAction):
+    """
+    Pop UCTP action
+
+    This action pops the outermost UCTP tag from the packet.
+    """
+    def __init__(self, type_=None, len_=None):
+        super(OFPActionPopUctp, self).__init__()
+
+    @classmethod
+    def parser(cls, buf, offset):
+        (type_, len_) = struct.unpack_from(
+            ofproto_v1_3.OFP_ACTION_HEADER_PACK_STR, buf, offset)
+        return cls()
+
+@OFPAction.register_action_type(ofproto_v1_3.OFPAT_DECAP_UCTP,
+                                ofproto_v1_3.OFP_ACTION_HEADER_SIZE)
+class OFPActionDecapUctp(OFPAction):
+    """
+    Decapsulate UCTP action
+
+    This action decapsulate UCTP tag from the packet.
+    """
+    def __init__(self, type_=None, len_=None):
+        super(OFPActionDecapUctp, self).__init__()
+
+    @classmethod
+    def parser(cls, buf, offset):
+        (type_, len_) = struct.unpack_from(
+            ofproto_v1_3.OFP_ACTION_HEADER_PACK_STR, buf, offset)
+        return cls()
 
 @OFPAction.register_action_type(ofproto_v1_3.OFPAT_POP_MPLS,
                                 ofproto_v1_3.OFP_ACTION_POP_MPLS_SIZE)
@@ -3098,12 +3218,6 @@ class OFPActionPopPbb(OFPAction):
     """
     def __init__(self, type_=None, len_=None):
         super(OFPActionPopPbb, self).__init__()
-
-    @classmethod
-    def parser(cls, buf, offset):
-        (type_, len_) = struct.unpack_from(
-            ofproto_v1_3.OFP_ACTION_HEADER_PACK_STR, buf, offset)
-        return cls()
 
     @classmethod
     def parser(cls, buf, offset):

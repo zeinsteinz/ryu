@@ -246,6 +246,10 @@ OFPAT_DEC_NW_TTL = 24  # Decrement IP TTL.
 OFPAT_SET_FIELD = 25  # Set a header field using OXM TLV format.
 OFPAT_PUSH_PBB = 26  # Push a new PBB service tag (I-TAG)
 OFPAT_POP_PBB = 27  # Pop the outer PBB service tag (I-TAG)
+OFPAT_PUSH_UCTP = 28
+OFPAT_POP_UCTP = 29
+OFPAT_ENCAP_UCTP = 30
+OFPAT_DECAP_UCTP = 31
 OFPAT_EXPERIMENTER = 0xffff
 
 # struct ofp_action_header
@@ -1165,6 +1169,7 @@ oxm_types = [
     oxm_fields.OpenFlowBasic('pbb_isid', 37, oxm_fields.Int3),
     oxm_fields.OpenFlowBasic('tunnel_id', 38, oxm_fields.Int8),
     oxm_fields.OpenFlowBasic('ipv6_exthdr', 39, oxm_fields.Int2),
+    oxm_fields.OpenFlowBasic('user_tag', 40, oxm_fields.Int4),
     oxm_fields.ONFExperimenter('pbb_uca', 2560, oxm_fields.Int1),
 ]
 
